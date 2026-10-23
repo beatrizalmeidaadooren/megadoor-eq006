@@ -1,21 +1,44 @@
 import { h, toast } from './ui.js';
 import { demo, state, iniciar, entrar, sair, carregarTudo } from './data.js';
-import { viewInicio, viewArvore, viewComponente, viewLista, viewLigacoes, viewBackup } from './views.js';
+import { viewArvore, viewComponente, viewLista, viewLigacoes, viewBackup } from './views.js';
+import { viewInicio } from './inicio.js';
+import { viewAcoes } from './acoes.js';
+import { viewPreventiva } from './preventiva.js';
+import { viewCausas } from './causas.js';
+import { viewMetodos } from './metodos.js';
+import { viewListas } from './listas.js';
 import { abrirFormulario } from './forms.js';
+import { modal } from './ui.js';
 
 const app = document.getElementById('app');
 
 const MENU = [
   ['#/', 'Início', 'inicio'], ['#/arvore', 'Árvore', 'arvore'], ['#/ocorrencias', 'Ocorrências', 'ocorrencias'],
-  ['#/compras', 'Compras', 'compras'], ['#/parametros', 'Parâmetros', 'parametros'], ['#/ligacoes', 'Ligações', 'ligacoes'],
-  ['#/usinagem', 'Usinagem', 'usinagem'], ['#/backup', 'Backup', 'backup']
+  ['#/acoes', 'Plano de ação', 'acoes'], ['#/preventiva', 'Preventiva', 'preventiva'], ['#/causas', 'Causas', 'causas']
 ];
+const MAIS = [
+  ['#/compras', 'Compras', 'compras', 'Peças compradas e estoque'], ['#/parametros', 'Parâmetros', 'parametros', 'Inversores, drivers e CNC'],
+  ['#/ligacoes', 'Ligações', 'ligacoes', 'Fiação e mapa'], ['#/usinagem', 'Usinagem', 'usinagem', 'Parâmetros de corte'],
+  ['#/metodos', 'Guia de métodos', 'metodos', '5 porquês, P-M, FMEA, TPM'], ['#/listas', 'Listas dos menus', 'listas', 'Adicionar e remover opções'],
+  ['#/backup', 'Backup', 'backup', 'Baixar cópia dos dados']
+];
+
+const logo = (cls = 'logo') => h('picture', null,
+  h('source', { srcset: 'icons/logo-escuro.png', media: '(prefers-color-scheme: dark)' }),
+  h('img', { src: 'icons/logo-claro.png', alt: 'Adooren', class: cls }));
+
+function abrirMais() {
+  const m = modal('Mais opções', h('div', { class: 'grade-mais' }, MAIS.map(([href, rot, , dica]) =>
+    h('a', { href, class: 'cartao-mais', onclick: () => setTimeout(() => m.close(), 0) }, h('strong', null, rot), h('small', null, dica)))));
+}
 
 function casca() {
   app.innerHTML = '';
-  const nav = h('nav', { class: 'menu', 'aria-label': 'Principal' }, MENU.map(([href, rot, id]) => h('a', { href, 'data-id': id }, rot)));
+  const nav = h('nav', { class: 'menu', 'aria-label': 'Principal' }, MENU.map(([href, rot, id]) => h('a', { href, 'data-id': id }, rot)),
+    h('button', { type: 'button', 'data-id': 'mais', onclick: abrirMais }, 'Mais ▾'));
   const topo = h('header', { class: 'topo' },
-    h('a', { href: '#/', class: 'marca' }, h('span', { class: 'marca-sigla' }, 'EQ006'), h('span', null, 'Megadoor 2.3 CNC')),
+    h('a', { href: '#/', class: 'marca', 'aria-label': 'Início' }, logo(),
+      h('span', { class: 'marca-maq' }, h('b', null, 'Megadoor 2.3 CNC'), h('small', null, 'EQ006 • ARQUIVO VIVO'))),
     h('div', { class: 'usuario' }, h('span', { class: 'papel' }, state.nome + (state.papel === 'leitura' ? ' (só leitura)' : '')),
       h('button', { class: 'btn pequeno', type: 'button', onclick: async () => { await sair(); location.hash = '#/'; telaLogin(); } }, 'Sair')));
   const principal = h('main', { id: 'principal', tabindex: -1 });
@@ -33,6 +56,11 @@ function rotear() {
     else if (rota === 'arvore') no = viewArvore();
     else if (rota === 'c') no = viewComponente(decodeURIComponent(a || ''));
     else if (rota === 'ligacoes') no = viewLigacoes(a, b);
+    else if (rota === 'acoes') no = viewAcoes(a);
+    else if (rota === 'preventiva') no = viewPreventiva();
+    else if (rota === 'causas') no = viewCausas(a || 'pareto');
+    else if (rota === 'metodos') no = viewMetodos();
+    else if (rota === 'listas') no = viewListas();
     else if (['ocorrencias', 'compras', 'parametros', 'usinagem'].includes(rota)) no = viewLista(rota);
     else if (rota === 'backup') no = viewBackup();
     else no = h('p', null, 'Página não encontrada.');
@@ -41,8 +69,9 @@ function rotear() {
     no = h('div', { class: 'painel' }, h('h2', null, 'Algo deu errado ao montar esta tela'), h('p', null, e.message));
   }
   principal.replaceChildren(no);
-  const id = rota === 'c' ? 'arvore' : (rota || 'inicio');
-  document.querySelectorAll('.menu a').forEach(l => l.classList.toggle('ativo', l.dataset.id === id));
+  let id = rota === 'c' ? 'arvore' : (rota || 'inicio');
+  if (MAIS.some(x => x[2] === id)) id = 'mais';
+  document.querySelectorAll('.menu a, .menu button').forEach(l => l.classList.toggle('ativo', l.dataset.id === id));
   window.scrollTo(0, 0);
 }
 
@@ -73,10 +102,10 @@ function telaLogin() {
     try { await entrar(email.value.trim(), senha.value); await abrir(); }
     catch (err) { erro.textContent = err.message; erro.hidden = false; btn.disabled = false; btn.textContent = 'Entrar'; }
   } },
-  h('div', { class: 'marca grande' }, h('span', { class: 'marca-sigla' }, 'EQ006'), h('span', null, 'Megadoor 2.3 CNC')),
-  h('h1', null, 'Arquivo vivo da máquina'),
+  logo('logo-grande'),
+  h('h1', null, 'Arquivo vivo • Megadoor 2.3 CNC'),
   h('label', { for: 'email' }, 'E-mail'), email, h('label', { for: 'senha' }, 'Senha'), senha, erro, btn,
-  h('p', { class: 'dica' }, 'Acesso restrito. Não há cadastro aberto.'));
+  h('p', { class: 'dica' }, 'Acesso restrito. Não há cadastro aberto.'), h('div', { class: 'rodape-marca' }, 'PORTAS PARA O FUTURO'));
   app.replaceChildren(f);
   email.focus();
 }

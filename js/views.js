@@ -3,27 +3,29 @@ import { h, norm, fmtDate, fmtDateTime, fmtMin, fmtMoney, modal, confirmar, toas
 import { TABELAS, COLUNAS, CANAIS } from './schema.js';
 import {
   state, demo, podeEditar, podeApagar, filhosDe, caminho, descendentes, nivelComponente, apagar,
-  backupCompleto, NOMES, demoReiniciar
+  backupCompleto, NOMES, demoReiniciar, opcoesDe, faltando
 } from './data.js';
+import { ROTULO_REF, hoje } from './forms.js';
+import { calcularCriticidade } from './critcalc.js';
 import { abrirFormulario, miniaturas } from './forms.js';
 import { desenharMapa, alcance } from './diagram.js';
 
 const irPara = hash => { location.hash = hash; };
-const linkComp = cod => {
+export const linkComp = cod => {
   const c = state.porCodigo.get(cod);
   return h('a', { href: '#/c/' + encodeURIComponent(cod), class: 'link-comp', title: cod },
     h('span', { class: 'cod' }, (cod || '').replace('EQ006-', '')), ' ', c?.nome || '');
 };
-const emblemaCanal = canal => {
+export const emblemaCanal = canal => {
   if (!canal) return null;
   const n = canal.startsWith('Canal 1') ? 'c1' : canal.startsWith('Canal 2') ? 'c2' : 'cc';
   return h('span', { class: 'emblema ' + n }, canal.startsWith('Canal 1') ? 'Canal 1' : canal.startsWith('Canal 2') ? 'Canal 2' : 'Comum');
 };
-const tituloPagina = (titulo, ...acoes) => h('div', { class: 'topo-pagina' }, h('h1', null, titulo), h('div', { class: 'acoes-topo' }, ...acoes));
-const botaoNovo = (rotulo, fn) => podeEditar() ? h('button', { class: 'btn primario', type: 'button', onclick: fn }, '+ ' + rotulo) : null;
+export const tituloPagina = (titulo, ...acoes) => h('div', { class: 'topo-pagina' }, h('h1', null, titulo), h('div', { class: 'acoes-topo' }, ...acoes));
+export const botaoNovo = (rotulo, fn) => podeEditar() ? h('button', { class: 'btn primario', type: 'button', onclick: fn }, '+ ' + rotulo) : null;
 
 // ---------- cálculos ----------
-function contagemFalhas() {
+export function contagemFalhas() {
   // falhas por código, somando as dos subitens nos ancestrais
   const total = new Map(), parada = new Map(), proprias = new Map();
   for (const o of state.t.ocorrencias) {
@@ -58,8 +60,10 @@ function novoSubitem(pai) {
 }
 
 // ---------- célula de tabela ----------
-function celula(tabela, campo, linha) {
+export function celula(tabela, campo, linha) {
   const v = linha[campo];
+  if (campo === 'executores') return (linha.executores?.length ? linha.executores.join(', ') : linha.executor) || '';
+  if (campo === 'data_hora_fim') return fmtDateTime(v);
   if (['componente', 'origem', 'destino'].includes(campo)) return linkComp(v);
   if (campo === 'data_hora') return fmtDateTime(v);
   if (/^data_|vigencia/.test(campo)) return fmtDate(v);
@@ -69,26 +73,40 @@ function celula(tabela, campo, linha) {
   if (campo === 'situacao') return h('span', { class: 'etq ' + (v === 'Confirmada' ? 'ok' : 'pend') }, v);
   return v ?? '';
 }
-const rotuloCampo = (tabela, k) => TABELAS[tabela].campos.find(c => c.k === k)?.rotulo || k;
+export const rotuloCampo = (tabela, k) => TABELAS[tabela].campos.find(c => c.k === k)?.rotulo || k;
 
 // ---------- detalhe (leitura) ----------
+const DETALHES = {};                       // detalhes especiais (análises, rotinas...), registrados pelos outros módulos
+export const registrarDetalhe = (tabela, fn) => { DETALHES[tabela] = fn; };
+const atualizarTela = () => window.dispatchEvent(new HashChangeEvent('hashchange'));
+
+export function valorLegivel(c, v, linha) {
+  if (Array.isArray(v)) return v.join(', ');
+  if (c.t === 'comp') return linkComp(v);
+  if (c.t === 'datetime') return fmtDateTime(v);
+  if (c.t === 'date') return fmtDate(v);
+  if (c.t === 'bool') return v ? 'Sim' : 'Não';
+  if (c.k === 'parada_min') return fmtMin(v);
+  if (c.k === 'valor' || c.k === 'custo_estimado') return fmtMoney(v);
+  if (c.t === 'ref') { const o = state.t[c.ref].find(x => x.id === v); return o ? ROTULO_REF[c.ref](o) : String(v); }
+  return String(v);
+}
+
 export async function abrirDetalhe(tabela, linha) {
+  if (DETALHES[tabela]) return DETALHES[tabela](linha);
   const def = TABELAS[tabela];
   const corpo = h('div', { class: 'detalhe' });
   const dl = h('dl');
   for (const c of def.campos) {
-    if (c.t === 'files') continue;
+    if (c.t === 'files' || c.t === 'titulo') continue;
     let v = linha[c.k];
-    if (v === null || v === undefined || v === '') continue;
-    let conteudo;
-    if (c.t === 'comp') conteudo = linkComp(v);
-    else if (c.t === 'datetime') conteudo = fmtDateTime(v);
-    else if (c.t === 'date') conteudo = fmtDate(v);
-    else if (c.k === 'parada_min') conteudo = fmtMin(v);
-    else if (c.k === 'valor') conteudo = fmtMoney(v);
-    else if (c.t === 'ocorrencia') { const o = state.t.ocorrencias.find(x => x.id === v); conteudo = o ? `${fmtDateTime(o.data_hora)} • ${o.tipo} • ${state.porCodigo.get(o.componente)?.nome || ''}` : v; }
-    else conteudo = String(v);
-    dl.append(h('dt', null, c.rotulo), h('dd', null, conteudo));
+    if (c.k === 'executores' && !v?.length) v = linha.executor;
+    if (v === null || v === undefined || v === '' || (Array.isArray(v) && !v.length)) continue;
+    dl.append(h('dt', null, c.rotulo.replace(/\s*\(.*$/, '').replace(/:.*$/, '')), h('dd', null, valorLegivel(c, v, linha)));
+    if (tabela === 'ocorrencias' && c.k === 'data_hora_fim' && linha.data_hora) {
+      const min = Math.round((new Date(linha.data_hora_fim) - new Date(linha.data_hora)) / 60000);
+      if (min >= 0) dl.append(h('dt', null, 'Duração'), h('dd', null, fmtMin(min)));
+    }
   }
   corpo.append(dl);
   if (linha.anexos?.length) corpo.append(h('h3', null, 'Fotos e anexos'), await miniaturas(linha.anexos));
@@ -96,12 +114,15 @@ export async function abrirDetalhe(tabela, linha) {
   const acoes = h('div', { class: 'acoes' });
   if (podeApagar()) acoes.append(h('button', { class: 'btn perigo', type: 'button', onclick: async () => {
     if (!await confirmar('Apagar este registro? Não dá para desfazer.')) return;
-    try { await apagar(tabela, linha); m.close(); toast('Apagado.'); window.dispatchEvent(new HashChangeEvent('hashchange')); }
+    try { await apagar(tabela, linha); m.close(); toast('Apagado.'); atualizarTela(); }
     catch (e) { toast(e.message, 'erro'); }
   } }, 'Apagar'));
-  if (podeEditar()) acoes.append(h('button', { class: 'btn primario', type: 'button', onclick: () => {
-    m.close(); abrirFormulario(tabela, { linha, aoSalvar: () => window.dispatchEvent(new HashChangeEvent('hashchange')) });
-  } }, 'Editar'));
+  if (podeEditar()) {
+    if (tabela === 'ocorrencias' && linha.tipo === 'Falha') acoes.append(h('button', { class: 'btn', type: 'button', onclick: () => {
+      m.close(); abrirFormulario('acoes', { padroes: { titulo: 'Evitar nova falha: ' + (state.porCodigo.get(linha.componente)?.nome || ''), componente: linha.componente, ocorrencia_id: linha.id, tipo: 'Corretiva' }, aoSalvar: () => toast('Ação criada no plano de ação.') });
+    } }, 'Criar ação'));
+    acoes.append(h('button', { class: 'btn primario', type: 'button', onclick: () => { m.close(); abrirFormulario(tabela, { linha, aoSalvar: atualizarTela }); } }, 'Editar'));
+  }
   corpo.append(acoes);
 }
 
@@ -110,7 +131,7 @@ export function viewLista(tabela) {
   const def = TABELAS[tabela];
   const cols = COLUNAS[tabela];
   const busca = h('input', { type: 'search', class: 'campo busca', placeholder: 'Buscar...', 'aria-label': 'Buscar' });
-  let filtroTipo = h('select', { class: 'campo', 'aria-label': 'Filtrar por tipo' }, h('option', { value: '' }, 'Todos os tipos'), TABELAS.ocorrencias.campos.find(c => c.k === 'tipo').opcoes.map(o => h('option', { value: o }, o)));
+  let filtroTipo = h('select', { class: 'campo', 'aria-label': 'Filtrar por tipo' }, h('option', { value: '' }, 'Todos os tipos'), opcoesDe('tipos_ocorrencia').map(o => h('option', { value: o }, o)));
   const corpo = h('div', { class: 'tabela-rolagem' });
   const contagem = h('span', { class: 'contagem' });
   const ordenar = {
@@ -125,7 +146,7 @@ export function viewLista(tabela) {
     const q = norm(busca.value).split(/\s+/).filter(Boolean);
     const linhas = state.t[tabela].filter(r => {
       if (tabela === 'ocorrencias' && filtroTipo.value && r.tipo !== filtroTipo.value) return false;
-      const txt = norm(Object.values(r).map(v => typeof v === 'object' ? '' : v).join(' ') + ' ' + (state.porCodigo.get(r.componente || r.origem)?.nome || '') + ' ' + (state.porCodigo.get(r.destino)?.nome || ''));
+      const txt = norm(Object.values(r).map(v => Array.isArray(v) ? v.join(' ') : typeof v === 'object' ? '' : v).join(' ') + ' ' + (state.porCodigo.get(r.componente || r.origem)?.nome || '') + ' ' + (state.porCodigo.get(r.destino)?.nome || ''));
       return q.every(t => txt.includes(t));
     }).sort(ordenar);
     contagem.textContent = `${linhas.length} de ${state.t[tabela].length}`;
@@ -144,48 +165,6 @@ export function viewLista(tabela) {
     tituloPagina(def.plural, botaoNovo(def.rotulo.toLowerCase(), () => abrirFormulario(tabela, { aoSalvar: desenhar }))),
     h('div', { class: 'barra-filtros' }, busca, tabela === 'ocorrencias' ? filtroTipo : null, contagem),
     corpo);
-}
-
-// ---------- início ----------
-export function viewInicio() {
-  const { total, parada } = contagemFalhas();
-  const falhas = state.t.ocorrencias.filter(o => o.tipo === 'Falha');
-  const minParada = falhas.reduce((s, o) => s + (o.parada_min || 0), 0);
-  const aConfirmar = state.t.ligacoes.filter(l => l.situacao !== 'Confirmada').length;
-
-  const rank = [...total.entries()].filter(([cod]) => state.porCodigo.get(cod)?.nivel === 'Componente')
-    .sort((a, b) => b[1] - a[1] || (parada.get(b[0]) || 0) - (parada.get(a[0]) || 0)).slice(0, 6);
-
-  const motores = state.t.componentes.filter(c => c.nivel === 'Componente' && /^(motor|eletromandril)/i.test(c.nome));
-  const fichaOk = c => !!(c.modelo && c.n_serie && c.especificacao);
-  const ultimas = [...state.t.ocorrencias].sort((a, b) => (b.data_hora || '').localeCompare(a.data_hora || '')).slice(0, 6);
-
-  const cartao = (valor, rotulo, href) => h('a', { class: 'cartao-num', href }, h('strong', null, valor), h('span', null, rotulo));
-
-  return h('div', null,
-    tituloPagina('Início', botaoNovo('Registrar ocorrência', () => abrirFormulario('ocorrencias', { aoSalvar: () => irPara('#/') }))),
-    h('div', { class: 'grade-cartoes' },
-      cartao(state.t.componentes.length, 'itens na árvore', '#/arvore'),
-      cartao(falhas.length, 'falhas registradas', '#/ocorrencias'),
-      cartao(minParada ? fmtMin(minParada) : '0', 'de máquina parada por falhas', '#/ocorrencias'),
-      cartao(aConfirmar, 'ligações a confirmar', '#/ligacoes')),
-    h('div', { class: 'duas-colunas' },
-      h('section', { class: 'painel' }, h('h2', null, 'Quem mais falha'),
-        rank.length ? h('ol', { class: 'ranking' }, rank.map(([cod, n]) => h('li', null, linkComp(cod),
-          h('span', { class: 'numeros' }, `${n} ${n === 1 ? 'falha' : 'falhas'}`, parada.get(cod) ? ` • ${fmtMin(parada.get(cod))} parado` : '')))) :
-          h('p', { class: 'vazio' }, 'Ainda não há falhas registradas. Comece pelo motor da caixa da fechadura: abra-o na árvore e registre as falhas passadas de que a equipe se lembra.'),
-        h('small', { class: 'dica' }, 'Soma as falhas do componente e de suas peças.')),
-      h('section', { class: 'painel' }, h('h2', null, 'Últimas ocorrências'),
-        ultimas.length ? h('ul', { class: 'lista-simples' }, ultimas.map(o => h('li', null,
-          h('span', { class: 'etq tipo-' + norm(o.tipo) }, o.tipo), ' ', linkComp(o.componente),
-          h('small', null, fmtDateTime(o.data_hora) + (o.modo_falha ? ' • ' + o.modo_falha : ''))))) : h('p', { class: 'vazio' }, 'Nada registrado ainda.'))),
-    h('section', { class: 'painel' }, h('h2', null, `Fichas dos motores (${motores.filter(fichaOk).length} de ${motores.length} completas)`),
-      h('p', { class: 'dica' }, 'Uma ficha completa tem modelo, número de série e especificação. Clique para preencher.'),
-      h('div', { class: 'tabela-rolagem' }, h('table', { class: 'tabela' },
-        h('thead', null, h('tr', null, ['Motor', 'Canal', 'Modelo', 'Nº de série', 'Especificação'].map(t => h('th', null, t)))),
-        h('tbody', null, motores.map(c => h('tr', null,
-          h('td', { 'data-rotulo': 'Motor' }, linkComp(c.codigo)), h('td', { 'data-rotulo': 'Canal' }, emblemaCanal(c.canal)),
-          ...['modelo', 'n_serie', 'especificacao'].map(k => h('td', { 'data-rotulo': rotuloCampo('componentes', k) }, c[k] ? '✓' : h('span', { class: 'falta' }, 'falta'))))))))));
 }
 
 // ---------- árvore ----------
@@ -256,6 +235,7 @@ export function viewComponente(cod) {
   ln('Código', cod); ln('Nível', c.nivel); ln('Canal', emblemaCanal(c.canal)); ln('Quantidade', c.qtd);
   ln('Fabricante', c.fabricante); ln('Modelo', c.modelo); ln('Nº de série', c.n_serie);
   ln('Especificação', c.especificacao ? h('span', { class: 'pre' }, c.especificacao) : null);
+  if (c.nivel === 'Componente') { const k = calcularCriticidade(cod); ln('Criticidade', k.classe ? h('span', null, h('span', { class: 'classe c-' + k.classe }, k.classe), ` ${k.score} pontos • recomendada: ${k.recomendada}`, k.av?.estrategia ? ` • adotada: ${k.av.estrategia}` : '', ' ', h('a', { href: '#/causas/criticidade' }, 'detalhes')) : h('a', { href: '#/causas/criticidade' }, 'ainda sem avaliação')); }
   ln('Crítico?', c.critico); ln('Detalhar', c.detalhar); ln('Status', c.status);
   const falta = c.falta_saber ? h('div', { class: 'aviso-falta' }, h('strong', null, 'O que ainda falta saber: '), c.falta_saber) : null;
   const checklist = c.checklist_verifica ? h('details', { class: 'checklist' }, h('summary', null, `Checklist atual (item ${c.item_checklist || '—'})`), h('p', null, c.checklist_verifica)) : null;
@@ -272,10 +252,10 @@ export function viewComponente(cod) {
   const oc = doGrupo(state.t.ocorrencias).sort((a, b) => (b.data_hora || '').localeCompare(a.data_hora || ''));
   const secOc = secao('Histórico de ocorrências', oc.length,
     oc.length ? h('ul', { class: 'linha-tempo' }, oc.map(o => h('li', { class: 'ev tipo-' + norm(o.tipo), tabindex: 0, onclick: e => { if (!e.target.closest('a')) abrirDetalhe('ocorrencias', o); }, onkeydown: e => { if (e.key === 'Enter') abrirDetalhe('ocorrencias', o); } },
-      h('div', { class: 'ev-topo' }, h('span', { class: 'etq tipo-' + norm(o.tipo) }, o.tipo), h('time', null, fmtDateTime(o.data_hora)), rotuloOrigem(o), o.anexos?.length ? '📎' : null),
+      h('div', { class: 'ev-topo' }, h('span', { class: 'etq tipo-' + norm(o.tipo) }, o.tipo), h('time', null, fmtDateTime(o.data_hora) + (o.data_hora_fim ? ' → ' + fmtDateTime(o.data_hora_fim) : '')), rotuloOrigem(o), o.anexos?.length ? '📎' : null),
       [o.modo_falha && h('div', null, h('b', null, 'Modo de falha: '), o.modo_falha), o.causa && h('div', null, h('b', null, 'Causa: '), o.causa),
         o.sintoma_previo && h('div', null, h('b', null, 'Sintoma prévio: '), o.sintoma_previo), o.acao && h('div', null, h('b', null, 'Ação: '), o.acao),
-        (o.parada_min || o.executor) && h('small', null, [o.parada_min ? `Parado ${fmtMin(o.parada_min)}` : '', o.executor ? `Executor: ${o.executor}` : ''].filter(Boolean).join(' • '))])))
+        (o.parada_min || o.executores?.length || o.executor) && h('small', null, [o.parada_min ? `Parado ${fmtMin(o.parada_min)}` : '', (o.executores?.length || o.executor) ? `Executou: ${o.executores?.length ? o.executores.join(', ') : o.executor}` : ''].filter(Boolean).join(' • '))])))
       : h('p', { class: 'vazio' }, 'Nenhuma ocorrência registrada.'),
     botaoNovo('Registrar ocorrência', () => abrirFormulario('ocorrencias', { padroes: { componente: cod }, aoSalvar: refresh })));
 
@@ -287,6 +267,12 @@ export function viewComponente(cod) {
       : h('p', { class: 'vazio' }, 'Nada registrado.'),
     botaoNovo(rotuloBotao, () => abrirFormulario(tabela, { padroes: { componente: cod }, aoSalvar: refresh })));
 
+  const secAcoes = secao('Ações do plano', doGrupo(state.t.acoes).length,
+    doGrupo(state.t.acoes).length ? h('ul', { class: 'lista-simples' }, doGrupo(state.t.acoes).sort((a, b) => (a.prazo || '9').localeCompare(b.prazo || '9')).map(a => h('li', { class: 'clicavel-li', onclick: e => { if (!e.target.closest('a')) abrirDetalhe('acoes', a); } },
+      h('span', { class: 'etq' }, a.status), ' ', a.titulo, h('small', null, [a.responsavel, a.prazo ? 'prazo ' + fmtDate(a.prazo) : ''].filter(Boolean).join(' • '))))) : h('p', { class: 'vazio' }, 'Nenhuma ação.'),
+    botaoNovo('Nova ação', () => abrirFormulario('acoes', { padroes: { componente: cod }, aoSalvar: refresh })));
+  const secOcultos = doGrupo(state.t.anomalias).length ? secao('Defeitos ocultos encontrados', doGrupo(state.t.anomalias).length,
+    h('ul', { class: 'lista-simples' }, doGrupo(state.t.anomalias).map(a => h('li', { class: 'clicavel-li', onclick: () => abrirDetalhe('anomalias', a) }, h('span', { class: 'etq ' + (a.status === 'Corrigida' ? 'ok' : 'pend') }, a.status), ' ', a.descricao, h('small', null, fmtDate(a.encontrado_em)))))) : null;
   const secCompras = mini('compras', doGrupo(state.t.compras).sort((a, b) => (b.data_pedido || '').localeCompare(a.data_pedido || '')), ['data_pedido', 'componente', 'peca', 'fornecedor', 'valor'], 'Registrar compra');
   const secParams = mini('parametros', doGrupo(state.t.parametros).sort((a, b) => (b.data_alteracao || '').localeCompare(a.data_alteracao || '')), ['data_alteracao', 'componente', 'parametro', 'valor_atual', 'valor_anterior'], 'Registrar parâmetro');
 
@@ -320,7 +306,7 @@ export function viewComponente(cod) {
     h('nav', { class: 'migalhas', 'aria-label': 'Caminho' }, h('a', { href: '#/arvore' }, 'Árvore'), cam.map(x => [' › ', x.codigo === cod ? h('strong', null, x.nome) : h('a', { href: '#/c/' + encodeURIComponent(x.codigo) }, x.nome)])),
     h('div', { class: 'topo-pagina' }, h('h1', null, c.nome), acoes),
     h('section', { class: 'painel' }, ficha, falta, checklist),
-    secOc, secFilhos, secLig, secCompras, secParams);
+    secOc, secAcoes, secOcultos, secFilhos, secLig, secCompras, secParams);
 }
 
 // ---------- ligações: tabela e mapa ----------
@@ -332,7 +318,7 @@ export function viewLigacoes(sub, arg) {
   if (!modoMapa) { const v = viewLista('ligacoes'); v.prepend(abas); return v; }
 
   let sel = arg ? decodeURIComponent(arg) : null;
-  const tipoSel = h('select', { class: 'campo', 'aria-label': 'Tipo de ligação' }, h('option', { value: '' }, 'Todos os tipos'), TABELAS.ligacoes.campos.find(c => c.k === 'tipo').opcoes.map(t => h('option', { value: t, selected: t === 'Potência' }, t)));
+  const tipoSel = h('select', { class: 'campo', 'aria-label': 'Tipo de ligação' }, h('option', { value: '' }, 'Todos os tipos'), opcoesDe('tipos_ligacao').map(t => h('option', { value: t, selected: t === 'Potência' }, t)));
   const quadro = h('div'), info = h('div', { class: 'painel info-mapa' });
   const desenhar = () => {
     let ligs = state.t.ligacoes.filter(l => !tipoSel.value || l.tipo === tipoSel.value);
@@ -363,10 +349,18 @@ export function viewBackup() {
   const stamp = new Date().toISOString().slice(0, 10);
   const linhas = NOMES.map(n => h('tr', null, h('td', null, n === 'componentes' ? 'Componentes (árvore)' : TABELAS[n].plural), h('td', null, state.t[n].length),
     h('td', null, h('button', { class: 'btn pequeno', type: 'button', onclick: () => {
-      const cols = n === 'componentes' ? TABELAS[n].campos.map(c => c.k).concat(['pai']) : ['id', ...TABELAS[n].campos.map(c => c.k)];
+      const cols = n === 'componentes' ? TABELAS[n].campos.map(c => c.k).concat(['pai']) : ['id', ...TABELAS[n].campos.map(c => c.k).filter(k => k !== 'executores'), ...(TABELAS[n].campos.some(c => c.k === 'executores') ? ['executores'] : [])];
       baixar(`megadoor_${n}_${stamp}.csv`, csv(state.t[n], [...new Set(cols)]), 'text/csv;charset=utf-8');
     } }, 'Baixar planilha (CSV)'))));
+  const tabelasComAnexo = NOMES.filter(n => TABELAS[n].campos.some(c => c.t === 'files'));
+  const arqs = tabelasComAnexo.flatMap(n => state.t[n].flatMap(r => r.anexos || [])).filter(a => a.type !== 'link');
+  const bytes = arqs.reduce((s, a) => s + (a.size || 0), 0), semTam = arqs.filter(a => !a.size).length;
+  const mb = bytes / 1048576, pct = Math.min(100, mb / 1024 * 100);
   return h('div', null, tituloPagina('Backup e exportação'),
+    h('section', { class: 'painel' }, h('h2', null, 'Espaço das fotos e anexos'),
+      h('p', null, `${arqs.length} arquivos guardados, cerca de ${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB de aproximadamente 1 GB do plano gratuito.`),
+      h('div', { class: 'barra-uso', role: 'img', 'aria-label': `${pct.toFixed(0)}% do espaço usado` }, h('div', { style: `width:${Math.max(1, pct)}%` })),
+      h('small', { class: 'dica' }, 'As fotos são reduzidas antes do envio (cerca de 100 a 250 KB cada). Arquivos grandes, como manuais em PDF, ficam melhor no OneDrive ou Drive: use "Colar link" no anexo.' + (semTam ? ` ${semTam} arquivo(s) sem tamanho registrado não entram na conta.` : ''))),
     h('section', { class: 'painel' },
       h('p', null, 'Baixe uma cópia de tudo com frequência (por exemplo, toda sexta-feira). O plano gratuito do banco de dados não inclui backups automáticos nem restauração.'),
       h('button', { class: 'btn primario', type: 'button', onclick: () => baixar(`megadoor_backup_${stamp}.json`, JSON.stringify(backupCompleto(), null, 1), 'application/json') }, 'Baixar backup completo (JSON)'),

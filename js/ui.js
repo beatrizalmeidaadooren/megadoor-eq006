@@ -89,7 +89,7 @@ export function modal(title, body, { wide = false, onClose } = {}) {
 export function confirmar(texto, rotulo = 'Apagar') {
   return new Promise(resolve => {
     let m;
-    const fim = v => { m.close(); resolve(v); };
+    const fim = v => { resolve(v); m.close(); };   // resolve primeiro: fechar a janela resolve como "não"
     m = modal('Confirmar', h('div', null,
       h('p', null, texto),
       h('div', { class: 'acoes' },
@@ -109,7 +109,8 @@ export function baixar(nome, conteudo, tipo) {
 export function csv(linhas, colunas) {
   const cel = v => {
     if (v === null || v === undefined) return '';
-    if (typeof v === 'object') v = JSON.stringify(v);
+    if (Array.isArray(v) && v.every(x => typeof x === 'string')) v = v.join('; ');
+    else if (typeof v === 'object') v = JSON.stringify(v);
     v = String(v);
     return /[;"\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
   };
@@ -117,7 +118,7 @@ export function csv(linhas, colunas) {
 }
 
 // reduz fotos antes de enviar (economiza espaço no plano gratuito)
-export function reduzirImagem(file, max = 1600, qualidade = 0.82) {
+export function reduzirImagem(file, max = 1280, qualidade = 0.72) {
   return new Promise(resolve => {
     if (!file.type.startsWith('image/') || file.type === 'image/gif') return resolve(file);
     const img = new Image();
@@ -137,3 +138,10 @@ export function reduzirImagem(file, max = 1600, qualidade = 0.82) {
     img.src = url;
   });
 }
+
+// ---------- datas (dia a dia, no fuso local) ----------
+export const hojeISO = () => toLocalInput().slice(0, 10);
+const paraData = iso => new Date(iso + 'T12:00:00');
+export function addDias(iso, n) { const d = paraData(iso); d.setDate(d.getDate() + n); return toLocalInput(d.toISOString()).slice(0, 10); }
+// dias de hoje até a data (negativo = já passou)
+export const diasAte = iso => iso ? Math.round((paraData(iso) - paraData(hojeISO())) / 86400000) : null;

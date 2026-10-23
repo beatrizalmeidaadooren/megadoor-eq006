@@ -1,13 +1,19 @@
 // Camada de dados: fala com o Supabase (ou com o modo demonstração, local).
 import { uuid } from './ui.js';
+import { LISTAS } from './schema.js';
 
 const CFG = window.MEGADOOR_CONFIG || {};
 export const demo = !(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY);
-export const NOMES = ['componentes', 'ocorrencias', 'compras', 'parametros', 'ligacoes', 'usinagem'];
+export const NOMES = ['componentes', 'ocorrencias', 'compras', 'parametros', 'ligacoes', 'usinagem', 'acoes', 'analises', 'hipoteses', 'anomalias', 'criticidade', 'fmea', 'rotinas', 'execucoes_rotina'];
+const AUXILIARES = ['opcoes'];                       // tabelas de apoio (menus)
+const TODAS = [...NOMES, ...AUXILIARES];
+// Tabelas criadas pelos scripts 04 e 06: se ainda não existirem no banco, o aplicativo segue funcionando sem elas
+const OPCIONAIS = ['acoes', 'analises', 'hipoteses', 'anomalias', 'criticidade', 'fmea', 'rotinas', 'execucoes_rotina', 'opcoes'];
+export const faltando = new Set();
 
 export const state = {
   user: null, papel: null, nome: null,
-  t: Object.fromEntries(NOMES.map(n => [n, []])),
+  t: Object.fromEntries(TODAS.map(n => [n, []])),
   porCodigo: new Map(), filhos: new Map()
 };
 
@@ -83,7 +89,14 @@ export async function sair() {
 }
 
 export async function carregarTudo() {
-  for (const n of NOMES) state.t[n] = await listar(n);
+  faltando.clear();
+  for (const n of TODAS) {
+    try { state.t[n] = await listar(n); }
+    catch (e) {
+      if (OPCIONAIS.includes(n) && /does not exist|schema cache|relation|Could not find/i.test(e.message || '')) { state.t[n] = []; faltando.add(n); }
+      else throw e;
+    }
+  }
   indexar();
 }
 export async function recarregar(n) { state.t[n] = await listar(n); if (n === 'componentes') indexar(); }
@@ -106,11 +119,16 @@ export async function salvar(n, linha, novo) {
   const chave = chaveDe(n);
   const limpa = { ...linha };
   for (const k of Object.keys(limpa)) if (limpa[k] === '') limpa[k] = null;
-  delete limpa.atualizado_em;
+  delete limpa.atualizado_em; delete limpa.npr;   // npr é calculado pelo banco
   if (demo) {
     const arr = demoDados[n];
     if (novo) { if (!limpa[chave]) limpa[chave] = uuid(); limpa.criado_em = new Date().toISOString(); arr.push(limpa); }
     else { const i = arr.findIndex(r => r[chave] === limpa[chave]); arr[i] = { ...arr[i], ...limpa }; }
+    if (n === 'execucoes_rotina' && novo) {          // espelha o gatilho do banco
+      const r = demoDados.rotinas.find(x => x.id === limpa.rotina_id);
+      if (r && (!r.ultima_execucao || r.ultima_execucao < limpa.data_execucao)) r.ultima_execucao = limpa.data_execucao;
+    }
+    if (n === 'fmea') delete limpa.npr;
     demoSalvar();
   } else if (novo) {
     const { error } = await sb.from(n).insert(limpa);
@@ -126,7 +144,7 @@ export async function apagar(n, linha) {
   const chave = chaveDe(n);
   if (demo) {
     const filhosTemRef = n === 'componentes' && (state.t.componentes.some(c => c.pai === linha.codigo) ||
-      ['ocorrencias', 'compras', 'parametros'].some(t => state.t[t].some(r => r.componente === linha.codigo)) ||
+      ['ocorrencias', 'compras', 'parametros', 'fmea'].some(t => state.t[t].some(r => r.componente === linha.codigo)) ||
       state.t.ligacoes.some(r => r.origem === linha.codigo || r.destino === linha.codigo));
     if (filhosTemRef) throw new Error('Este componente tem subitens, registros ou ligações. Apague ou mova esses itens antes.');
     demoDados[n] = demoDados[n].filter(r => r[chave] !== linha[chave]);
@@ -149,21 +167,43 @@ function erro(e) {
   return new Error(e.message || 'Erro ao falar com o banco de dados.');
 }
 
+// ---------- menus editáveis ----------
+export function opcoesDe(lista) {
+  const linhas = state.t.opcoes.filter(o => o.lista === lista);
+  if (!linhas.length && faltando.has('opcoes')) return [...(LISTAS[lista]?.padrao || [])];   // banco ainda sem a tabela
+  const ord = (a, b) => (a.ordem - b.ordem) || a.valor.localeCompare(b.valor, 'pt');
+  return linhas.sort(lista === 'pessoas' ? (a, b) => a.valor.localeCompare(b.valor, 'pt') : ord).map(o => o.valor);
+}
+export async function adicionarOpcao(lista, valor) {
+  valor = valor.trim().replace(/\s+/g, ' ');
+  if (!valor) throw new Error('Digite um nome.');
+  if (state.t.opcoes.some(o => o.lista === lista && o.valor.toLowerCase() === valor.toLowerCase())) throw new Error('Esta opção já existe na lista.');
+  const ordem = Math.max(0, ...state.t.opcoes.filter(o => o.lista === lista).map(o => o.ordem || 0)) + 1;
+  await salvar('opcoes', { id: uuid(), lista, valor, ordem }, true);
+  return valor;
+}
+export async function removerOpcao(lista, valor) {
+  const o = state.t.opcoes.find(x => x.lista === lista && x.valor === valor);
+  if (o) await apagar('opcoes', o);
+}
+
 // ---------- anexos ----------
 export async function enviarArquivo(pasta, id, file) {
   const nomeSeguro = file.name.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w.\-]+/g, '_').slice(-80);
   const path = `${pasta}/${id}/${Date.now()}-${nomeSeguro}`;
-  if (demo) { mem.arquivos.set(path, URL.createObjectURL(file)); return { path, name: file.name, type: file.type }; }
+  if (demo) { mem.arquivos.set(path, URL.createObjectURL(file)); return { path, name: file.name, type: file.type, size: file.size }; }
   const { error } = await sb.storage.from('anexos').upload(path, file, { contentType: file.type, upsert: false });
   if (error) throw erro(error);
-  return { path, name: file.name, type: file.type };
+  return { path, name: file.name, type: file.type, size: file.size };
 }
 export async function urlArquivo(path) {
+  if (!path) return null;
   if (demo) return mem.arquivos.get(path) || null;
   const { data, error } = await sb.storage.from('anexos').createSignedUrl(path, 3600);
   return error ? null : data.signedUrl;
 }
 export async function apagarArquivo(path) {
+  if (!path) return;                       // anexo do tipo link: não há arquivo para apagar
   if (demo) { mem.arquivos.delete(path); return; }
   await sb.storage.from('anexos').remove([path]);
 }
@@ -181,10 +221,11 @@ let demoDados = {};
 const DEMO_CHAVE = 'megadoor_demo_v1';
 function demoSalvar() { try { localStorage.setItem(DEMO_CHAVE, JSON.stringify(demoDados)); } catch { /* sem espaço: ignora */ } }
 async function demoCarregar() {
-  try { const s = localStorage.getItem(DEMO_CHAVE); if (s) { demoDados = JSON.parse(s); return; } } catch { /* ignora */ }
+  try { const s = localStorage.getItem(DEMO_CHAVE); if (s) { demoDados = JSON.parse(s); for (const n of TODAS) demoDados[n] ||= []; return; } } catch { /* ignora */ }
   let semente = null;
   try { const r = await fetch('demo_seed.json', { cache: 'no-store' }); if (r.ok) semente = await r.json(); } catch { /* ignora */ }
-  demoDados = Object.fromEntries(NOMES.map(n => [n, []]));
+  demoDados = Object.fromEntries(TODAS.map(n => [n, []]));
+  demoDados.opcoes = Object.entries(LISTAS).flatMap(([lista, d]) => d.padrao.map((valor, i) => ({ id: uuid(), lista, valor, ordem: i + 1 })));
   if (semente) {
     demoDados.componentes = semente.componentes || [];
     demoDados.ligacoes = (semente.ligacoes || []).map(l => ({ id: uuid(), ...l }));
