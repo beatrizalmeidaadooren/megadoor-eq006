@@ -1,7 +1,7 @@
 // Guarda os arquivos do aplicativo para abrir mais rápido e permitir instalar no celular.
 // Os dados NUNCA são guardados aqui: vêm sempre do banco, após o login.
-const VERSAO = 'v1';
-const ARQUIVOS = ['./', 'index.html', 'css/app.css', 'js/app.js', 'js/ui.js', 'js/data.js', 'js/forms.js', 'js/views.js', 'js/schema.js', 'js/diagram.js', 'js/config.js', 'vendor/supabase.js', 'icons/icon.svg'];
+const VERSAO = 'v3';
+const ARQUIVOS = ['./', 'index.html', 'css/app.css', 'js/app.js', 'js/ui.js', 'js/data.js', 'js/forms.js', 'js/views.js', 'js/schema.js', 'js/diagram.js', 'js/listas.js', 'js/acoes.js', 'js/preventiva.js', 'js/causas.js', 'js/metodos.js', 'js/inicio.js', 'js/estatistica.js', 'js/critcalc.js', 'js/config.js', 'vendor/supabase.js', 'icons/logo-claro.png', 'icons/logo-escuro.png', 'icons/favicon.png'];
 
 self.addEventListener('install', e => { e.waitUntil(caches.open(VERSAO).then(c => c.addAll(ARQUIVOS)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => {
