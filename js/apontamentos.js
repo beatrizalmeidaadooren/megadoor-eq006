@@ -1,3 +1,4 @@
+// v2026-11-10b
 // Ligação com o sistema de apontamentos da Megadoor (outro banco: o do coletor).
 // Todo apontamento que diz o conjunto e o item (ou que é quebra de máquina) vira uma
 // ocorrência no componente certo da árvore. O nome escrito no apontamento é ligado ao
