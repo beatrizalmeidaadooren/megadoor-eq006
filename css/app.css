@@ -253,3 +253,28 @@ details.painel > summary { cursor: pointer; }
 .ajuda-icone { display: inline-flex; align-items: center; justify-content: center; width: 1.3rem; height: 1.3rem; border-radius: 50%; background: var(--marca); color: #fff; font-weight: 800; font-size: .8rem; flex: none; }
 .ajuda-corpo { padding-top: .4rem; } .ajuda-corpo h4 { margin: .6rem 0 .2rem; font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: var(--suave); } .ajuda-corpo p, .ajuda-corpo ol { margin: 0; } .ajuda-corpo ol { padding-left: 1.2rem; } .ajuda-corpo li { margin: .25rem 0; }
 .ajuda-exemplo { background: var(--painel); border: 1px dashed var(--linha); border-radius: 6px; padding: .5rem .7rem; }
+
+/* sumário lateral da página do componente */
+.com-sumario { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 1rem; align-items: start; }
+.sumario { position: sticky; top: 124px; max-height: calc(100vh - 140px); overflow-y: auto; background: var(--painel); border: 1px solid var(--linha); border-radius: var(--raio); padding: .6rem .4rem; box-shadow: var(--sombra); }
+.sumario-tit { font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--suave); padding: 0 .5rem .4rem; font-weight: 700; }
+.sumario a { display: flex; justify-content: space-between; align-items: center; gap: .4rem; padding: .4rem .55rem; border-radius: 6px; text-decoration: none; color: var(--texto); font-size: .92rem; border-left: 3px solid transparent; }
+.sumario a:hover { background: var(--fundo); }
+.sumario a.ativo { background: var(--fundo); border-left-color: var(--primaria); font-weight: 700; }
+.sumario-n { font-size: .75rem; color: var(--suave); background: var(--fundo); border: 1px solid var(--linha); border-radius: 99px; padding: 0 .45rem; font-weight: 600; }
+.parte-ancora { scroll-margin-top: 130px; }
+@media (max-width: 860px) {
+  .com-sumario { grid-template-columns: 1fr; }
+  .sumario { position: sticky; top: 110px; z-index: 10; display: flex; gap: .3rem; overflow-x: auto; overflow-y: hidden; max-height: none; padding: .35rem; scrollbar-width: thin; }
+  .sumario-tit { display: none; }
+  .sumario a { flex: none; border-left: 0; border-bottom: 3px solid transparent; white-space: nowrap; }
+  .sumario a.ativo { border-bottom-color: var(--primaria); }
+  .parte-ancora { scroll-margin-top: 170px; }
+}
+
+/* partes que minimizam e expandem */
+.titulo-recolhe { cursor: pointer; user-select: none; display: flex; align-items: center; gap: .4rem; }
+.seta-recolhe { display: inline-block; transition: transform .15s; color: var(--suave); font-size: .9em; width: 1em; }
+.recolhida .seta-recolhe { transform: rotate(-90deg); }
+.recolhida > :not(h2) { display: none !important; }
+.recolhida > h2 { margin-bottom: 0; }
