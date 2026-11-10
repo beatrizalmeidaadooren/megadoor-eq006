@@ -302,11 +302,58 @@ export function viewComponente(cod) {
       try { await apagar('componentes', c); toast('Apagado.'); irPara(c.pai ? '#/c/' + encodeURIComponent(c.pai) : '#/arvore'); } catch (e) { toast(e.message, 'erro'); }
     } }, 'Apagar') : null);
 
+  const secFicha = h('section', { class: 'painel' }, h('h2', null, 'Ficha'), ficha, falta, checklist);
+  const secParadas = painelParadas(oc);
+  const partes = [secFicha, secParadas, secOc, secAcoes, secOcultos, secFilhos, secLig, secCompras, secParams].filter(Boolean);
   return h('div', { class: 'pagina-comp' },
     h('nav', { class: 'migalhas', 'aria-label': 'Caminho' }, h('a', { href: '#/arvore' }, 'Árvore'), cam.map(x => [' › ', x.codigo === cod ? h('strong', null, x.nome) : h('a', { href: '#/c/' + encodeURIComponent(x.codigo) }, x.nome)])),
     h('div', { class: 'topo-pagina' }, h('h1', null, c.nome), acoes),
-    h('section', { class: 'painel' }, ficha, falta, checklist),
-    painelParadas(oc), secOc, secAcoes, secOcultos, secFilhos, secLig, secCompras, secParams);
+    comSumario(partes));
+}
+
+// ---------- sumário lateral: clica numa parte e vai direto para ela ----------
+function comSumario(secoes) {
+  const itens = secoes.map((sec, i) => {
+    const t = sec.querySelector('h2');
+    const nome = t ? [...t.childNodes].filter(n => !(n.classList && n.classList.contains('contagem-sec'))).map(n => n.textContent).join('').trim() : 'Parte ' + (i + 1);
+    const n = t && t.querySelector('.contagem-sec') ? t.querySelector('.contagem-sec').textContent : null;
+    sec.id = 'parte-' + i; sec.classList.add('parte-ancora');
+    // cada parte pode ser minimizada/expandida (clique no título); a escolha fica lembrada neste navegador
+    const chave = 'av-recolhido-' + norm(nome);
+    let recolhida = false; try { recolhida = localStorage.getItem(chave) === '1'; } catch { /* sem armazenamento */ }
+    const alternar = (forcar) => {
+      recolhida = forcar !== undefined ? forcar : !recolhida;
+      sec.classList.toggle('recolhida', recolhida);
+      if (t) t.setAttribute('aria-expanded', String(!recolhida));
+      try { if (recolhida) localStorage.setItem(chave, '1'); else localStorage.removeItem(chave); } catch { /* sem armazenamento */ }
+    };
+    if (t) {
+      t.classList.add('titulo-recolhe'); t.setAttribute('role', 'button'); t.tabIndex = 0;
+      t.title = 'Clique para minimizar ou expandir';
+      t.prepend(h('span', { class: 'seta-recolhe', 'aria-hidden': 'true' }, '▾'));
+      t.addEventListener('click', e => { if (!e.target.closest('a,button')) alternar(); });
+      t.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); alternar(); } });
+      alternar(recolhida);
+    }
+    const link = h('a', { href: 'javascript:void 0', 'data-alvo': sec.id, onclick: e => { e.preventDefault(); if (recolhida) alternar(false); travado = Date.now(); marcar(sec.id); sec.scrollIntoView({ behavior: 'smooth', block: 'start' }); } },
+      h('span', null, nome), n !== null ? h('span', { class: 'sumario-n' }, n) : null);
+    return link;
+  });
+  const nav = h('nav', { class: 'sumario', 'aria-label': 'Sumário desta página' }, h('div', { class: 'sumario-tit' }, 'Nesta página'), itens);
+  let travado = 0;   // depois de um clique no sumário, a rolagem suave não troca o destaque
+  function marcar(id) { itens.forEach(a => a.classList.toggle('ativo', a.dataset.alvo === id)); }
+  // destaca a parte que está na tela enquanto rola
+  if ('IntersectionObserver' in window) {
+    const visiveis = new Map();
+    const obs = new IntersectionObserver(ents => {
+      ents.forEach(en => visiveis.set(en.target.id, en.isIntersecting ? en.boundingClientRect.top : null));
+      const ativos = [...visiveis.entries()].filter(([, t]) => t !== null).sort((a, b) => a[1] - b[1]);
+      if (ativos.length && Date.now() - travado > 1200) marcar(ativos[0][0]);
+    }, { rootMargin: '-130px 0px -55% 0px' });
+    setTimeout(() => secoes.forEach(sec => obs.observe(sec)), 0);
+  }
+  marcar(secoes[0] && secoes[0].id);
+  return h('div', { class: 'com-sumario' }, nav, h('div', { class: 'com-sumario-corpo' }, secoes));
 }
 
 // ---------- resumo das paradas do componente (inclui as que vieram dos apontamentos) ----------
