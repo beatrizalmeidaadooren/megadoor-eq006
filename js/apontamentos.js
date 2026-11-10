@@ -4,7 +4,7 @@
 // ocorrência no componente certo da árvore. O nome escrito no apontamento é ligado ao
 // componente por um "vínculo" (tabela vinculos_apontamento): você vincula uma vez e os
 // próximos apontamentos com o mesmo conjunto e item já vão direto.
-import { h, norm, fmtDateTime, fmtMin, toast, uuid } from './ui.js';
+import { h, norm, fmtDateTime, fmtMin, toast, uuid, modal } from './ui.js';
 import { state, cliente, recarregar, podeEditar, caminho } from './data.js';
 import { linkComp, tituloPagina } from './views.js';
 
@@ -62,7 +62,7 @@ export async function lerEventos() {
   const lista = [...nregs];
   const col = [];
   for (let i = 0; i < lista.length; i += 200) {
-    const { data, error } = await apCliente().from('coletor').select('nreg,data_hora,hora_anterior,t_ciclo_s,idturno,menuid,conjunto,item,problema,solucao,observacao').in('nreg', lista.slice(i, i + 200));
+    const { data, error } = await apCliente().from('coletor').select('nreg,data_hora,hora_anterior,hora,t_ciclo_s,idturno,menuid,oee_operador,conjunto,item,problema,solucao,observacao').in('nreg', lista.slice(i, i + 200));
     if (error) throw new Error('coletor: ' + error.message);
     col.push(...data);
   }
@@ -85,7 +85,8 @@ export async function lerEventos() {
       if ((conj && item) || ehQuebra(sub)) eventos.push({
         id: String(l.nreg) + (p ? '-' + p.parte : ''), nreg: l.nreg, parte: p ? p.parte : null, turno: l.idturno,
         inicio: t0, fim: tf, segundos: seg, conjunto: conj, item, problema: pad('problema', v('problema')), solucao: pad('solucao', v('solucao')),
-        obs: txt(l.observacao), minhaObs: txt(p ? p.obs : a.obs), subgrupo: sub || null, seis: seis || null,
+        obs: txt(l.observacao), minhaObs: txt(p ? p.obs : a.obs), subgrupo: sub || null, seis: seis || null, programada: prog || null,
+        operador: txt(l.oee_operador), escritoOperador: [txt(l.conjunto), txt(l.item), txt(l.problema), txt(l.solucao)], tCiclo: l.t_ciclo_s,
         chave: conj && item ? chaveVinculo(conj, item) : 'nreg:' + l.nreg + (p ? '-' + p.parte : '')
       });
       t0 = tf;
@@ -134,7 +135,7 @@ export async function sincronizar() {
     if (novas.length || mudar.length) await recarregar('ocorrencias');
   }
   const orfas = [...existentes.values()].filter(o => !ids.has(o.origem_id));
-  return { eventos: eventos.length, novas: novas.length, atualizadas: mudar.length, pendentes, orfas };
+  return { eventos: eventos.length, todos: eventos, novas: novas.length, atualizadas: mudar.length, pendentes, orfas };
 }
 
 // sugere o componente pelo texto (palavras em comum com o nome e o caminho na árvore)
@@ -156,6 +157,31 @@ function seletorComponente(selecionado) {
   const nivelTab = c => c.nivel === 'Conjunto' ? '' : c.nivel === 'Componente' ? '  ' : '    ';
   return h('select', { class: 'campo', style: 'min-width:16rem;max-width:100%' }, h('option', { value: '' }, '— escolha o componente —'),
     ord.map(c => h('option', { value: c.codigo, selected: c.codigo === selecionado }, nivelTab(c) + c.codigo.replace('EQ006-', '') + ' · ' + c.nome)));
+}
+
+// ---------- todos os dados dos apontamentos de um grupo ----------
+const TURNO = ['', 'A', 'B', 'C'];
+export function verApontamentos(titulo, evs) {
+  const hm = d => d.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'medium' });
+  const linha = (rot, v) => v ? h('div', { style: 'margin:.15rem 0' }, h('b', null, rot + ': '), v) : null;
+  const corpo = h('div', null,
+    h('p', { class: 'dica' }, `${evs.length} apontamento(s) · ${fmtMin(Math.round(evs.reduce((a, e) => a + e.segundos, 0) / 60))} parados no total. O que você ajustou no sistema de apontamentos aparece no lugar do que o operador escreveu (o original fica embaixo).`),
+    evs.map(e => {
+      const [oc, oi, op, os] = e.escritoOperador || [];
+      const mudou = (oc && oc !== e.conjunto) || (oi && oi !== e.item) || (op && op !== e.problema) || (os && os !== e.solucao);
+      return h('div', { class: 'painel', style: 'margin:.6rem 0;padding:.7rem .9rem' },
+        h('div', { style: 'display:flex;justify-content:space-between;gap:.5rem;flex-wrap:wrap;margin-bottom:.3rem' },
+          h('strong', null, `Apontamento nº ${e.nreg}${e.parte ? ' · parte ' + e.parte : ''}`),
+          h('span', { class: 'etq' }, 'Turno ' + (TURNO[e.turno] || e.turno || '—'))),
+        linha('Quando', `${hm(e.inicio)} → ${hm(e.fim)} (${fmtMin(Math.max(1, Math.round(e.segundos / 60)))} parado)`),
+        linha('Classificação', [e.programada, e.subgrupo, e.seis].filter(Boolean).join(' · ') || 'sem classificação'),
+        linha('Operador apontou no coletor', e.operador),
+        linha('Conjunto › Item', [e.conjunto, e.item].filter(Boolean).join(' › ')),
+        linha('Problema', e.problema), linha('Solução', e.solucao),
+        linha('Observação do operador', e.obs), linha('Minha observação', e.minhaObs),
+        mudou ? h('small', { style: 'display:block;color:var(--suave);margin-top:.3rem' }, 'Escrito originalmente pelo operador: ' + [oc, oi, op, os].map(x => x || '—').join(' · ')) : null);
+    }));
+  modal(titulo, corpo, { wide: true });
 }
 
 // ---------- tela ----------
@@ -223,7 +249,8 @@ function desenhar(res, corpo) {
         const ign = h('button', { class: 'btn pequeno', type: 'button', disabled: !podeEditar(), title: 'Não é de nenhum componente (teste, erro de digitação...)', onclick: async () => { try { await salvarVinc(g, null, true); } catch (er) { toast(er.message, 'erro'); } } }, 'Ignorar');
         const nome = e.conjunto || e.item ? h('span', null, h('b', null, [e.conjunto, e.item].filter(Boolean).join(' › '))) :
           h('span', null, h('b', null, `Quebra sem conjunto/item · apontamento nº ${e.nreg}`), e.problema || e.obs ? h('small', { style: 'display:block' }, [e.problema, e.obs].filter(Boolean).join(' · ')) : null);
-        return h('tr', null, h('td', null, nome, sel.value ? h('small', { style: 'display:block;color:var(--suave)' }, 'sugestão escolhida pelo texto: confira') : null),
+        const ver = h('a', { href: 'javascript:void 0', style: 'display:inline-block;margin-top:.2rem;font-size:.85rem', onclick: ev => { ev.preventDefault(); verApontamentos([e.conjunto, e.item].filter(Boolean).join(' › ') || 'Apontamento nº ' + e.nreg, g.ev); } }, `ver ${g.ev.length > 1 ? 'os ' + g.ev.length + ' apontamentos' : 'o apontamento'} (horários, observações…)`);
+        return h('tr', null, h('td', null, nome, h('div', null, ver), sel.value ? h('small', { style: 'display:block;color:var(--suave)' }, 'sugestão escolhida pelo texto: confira') : null),
           h('td', null, g.ev.length + 'x'), h('td', null, fmtMin(Math.round(g.seg / 60))), h('td', null, fmtDateTime(e.inicio)),
           h('td', null, sel), h('td', { style: 'white-space:nowrap' }, ok, ' ', ign));
       }))))
@@ -233,6 +260,7 @@ function desenhar(res, corpo) {
     vincs.length ? h('ul', { class: 'lista-simples' }, vincs.map(v => h('li', null,
       h('b', null, v.conjunto || v.item ? [v.conjunto, v.item].filter(Boolean).join(' › ') : v.chave.replace('nreg:', 'apontamento nº ')), ' → ',
       v.ignorar ? h('span', { class: 'etq' }, 'ignorado') : v.componente ? linkComp(v.componente) : h('span', { class: 'etq pend' }, 'componente apagado'),
+      (() => { const evs = (r.todos || []).filter(e => e.chave === v.chave); return evs.length ? [' ', h('a', { href: 'javascript:void 0', style: 'font-size:.85rem', onclick: ev => { ev.preventDefault(); verApontamentos([v.conjunto, v.item].filter(Boolean).join(' › ') || v.chave, evs); } }, `ver ${evs.length} apontamento(s)`)] : null; })(),
       podeEditar() ? h('button', { class: 'btn-icone pequeno', type: 'button', title: 'Desfazer o vínculo (volta para "A vincular")', onclick: async () => {
         const { error } = await sb.from('vinculos_apontamento').delete().eq('chave', v.chave); if (error) return toast(error.message, 'erro');
         await recarregar('vinculos_apontamento'); ultimo = await sincronizar(); desenhar(res, corpo); toast('Vínculo desfeito.');
