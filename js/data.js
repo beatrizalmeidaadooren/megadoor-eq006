@@ -5,10 +5,10 @@ import { LISTAS } from './schema.js';
 const CFG = window.MEGADOOR_CONFIG || {};
 export const demo = !(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY);
 export const NOMES = ['componentes', 'ocorrencias', 'compras', 'parametros', 'ligacoes', 'usinagem', 'acoes', 'analises', 'hipoteses', 'anomalias', 'criticidade', 'fmea', 'rotinas', 'execucoes_rotina'];
-const AUXILIARES = ['opcoes'];                       // tabelas de apoio (menus)
+const AUXILIARES = ['opcoes', 'vinculos_apontamento'];                       // tabelas de apoio (menus)
 const TODAS = [...NOMES, ...AUXILIARES];
 // Tabelas criadas pelos scripts 04 e 06: se ainda não existirem no banco, o aplicativo segue funcionando sem elas
-const OPCIONAIS = ['acoes', 'analises', 'hipoteses', 'anomalias', 'criticidade', 'fmea', 'rotinas', 'execucoes_rotina', 'opcoes'];
+const OPCIONAIS = ['acoes', 'analises', 'hipoteses', 'anomalias', 'criticidade', 'fmea', 'rotinas', 'execucoes_rotina', 'opcoes', 'vinculos_apontamento'];
 export const faltando = new Set();
 
 export const state = {
@@ -21,6 +21,7 @@ export const podeEditar = () => state.papel === 'admin' || state.papel === 'regi
 export const podeApagar = () => state.papel === 'admin';
 
 let sb = null;
+export const cliente = () => sb;   // usado pela ligação com o sistema de apontamentos
 const mem = { arquivos: new Map() };           // anexos do modo demonstração (só na memória)
 
 // ---------- indexação ----------
@@ -159,7 +160,7 @@ export async function apagar(n, linha) {
   await recarregar(n);
 }
 
-function chaveDe(n) { return n === 'componentes' ? 'codigo' : 'id'; }
+function chaveDe(n) { return n === 'componentes' ? 'codigo' : n === 'vinculos_apontamento' ? 'chave' : 'id'; }
 
 function erro(e) {
   if (e.code === '42501' || /row-level security/i.test(e.message || '')) return new Error('Sem permissão para esta ação.');

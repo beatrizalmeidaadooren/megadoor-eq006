@@ -9,12 +9,13 @@ import { viewMetodos } from './metodos.js';
 import { viewListas } from './listas.js';
 import { abrirFormulario } from './forms.js';
 import { modal } from './ui.js';
+import { viewApontamentos, sincronizarSilencioso } from './apontamentos.js';
 
 const app = document.getElementById('app');
 
 const MENU = [
   ['#/', 'Início', 'inicio'], ['#/arvore', 'Árvore', 'arvore'], ['#/ocorrencias', 'Ocorrências', 'ocorrencias'],
-  ['#/acoes', 'Plano de ação', 'acoes'], ['#/preventiva', 'Preventiva', 'preventiva'], ['#/causas', 'Causas', 'causas']
+  ['#/acoes', 'Plano de ação', 'acoes'], ['#/preventiva', 'Preventiva', 'preventiva'], ['#/causas', 'Causas', 'causas'], ['#/apontamentos', 'Apontamentos', 'apontamentos']
 ];
 const MAIS = [
   ['#/compras', 'Compras', 'compras', 'Peças compradas e estoque'], ['#/parametros', 'Parâmetros', 'parametros', 'Inversores, drivers e CNC'],
@@ -63,6 +64,7 @@ function rotear() {
     else if (rota === 'listas') no = viewListas();
     else if (['ocorrencias', 'compras', 'parametros', 'usinagem'].includes(rota)) no = viewLista(rota);
     else if (rota === 'backup') no = viewBackup();
+    else if (rota === 'apontamentos') no = viewApontamentos();
     else no = h('p', null, 'Página não encontrada.');
   } catch (e) {
     console.error(e);
@@ -90,6 +92,8 @@ async function abrir() {
     h('p', { class: 'dica' }, 'Se for a primeira vez, confira se o esquema do banco (01_esquema.sql) foi executado.'), h('button', { class: 'btn', onclick: () => location.reload() }, 'Tentar de novo'))); return; }
   casca();
   rotear();
+  // traz os apontamentos novos da Megadoor em segundo plano (se já estiver conectado ao sistema de apontamentos)
+  sincronizarSilencioso().then(r => { if (r && (r.novas || r.atualizadas) && /^#\/(c\/|ocorrencias|$)/.test(location.hash || '#/')) rotear(); });
 }
 
 function telaLogin() {

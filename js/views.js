@@ -252,7 +252,7 @@ export function viewComponente(cod) {
   const oc = doGrupo(state.t.ocorrencias).sort((a, b) => (b.data_hora || '').localeCompare(a.data_hora || ''));
   const secOc = secao('Histórico de ocorrências', oc.length,
     oc.length ? h('ul', { class: 'linha-tempo' }, oc.map(o => h('li', { class: 'ev tipo-' + norm(o.tipo), tabindex: 0, onclick: e => { if (!e.target.closest('a')) abrirDetalhe('ocorrencias', o); }, onkeydown: e => { if (e.key === 'Enter') abrirDetalhe('ocorrencias', o); } },
-      h('div', { class: 'ev-topo' }, h('span', { class: 'etq tipo-' + norm(o.tipo) }, o.tipo), h('time', null, fmtDateTime(o.data_hora) + (o.data_hora_fim ? ' → ' + fmtDateTime(o.data_hora_fim) : '')), rotuloOrigem(o), o.anexos?.length ? '📎' : null),
+      h('div', { class: 'ev-topo' }, h('span', { class: 'etq tipo-' + norm(o.tipo) }, o.tipo), h('time', null, fmtDateTime(o.data_hora) + (o.data_hora_fim ? ' → ' + fmtDateTime(o.data_hora_fim) : '')), rotuloOrigem(o), o.origem === 'apontamento' ? h('span', { class: 'etq', title: 'Criada a partir do sistema de apontamentos' }, 'apontamento nº ' + ((o.apontamento && o.apontamento.nreg) || o.origem_id)) : null, o.anexos?.length ? '📎' : null),
       [o.modo_falha && h('div', null, h('b', null, 'Modo de falha: '), o.modo_falha), o.causa && h('div', null, h('b', null, 'Causa: '), o.causa),
         o.sintoma_previo && h('div', null, h('b', null, 'Sintoma prévio: '), o.sintoma_previo), o.acao && h('div', null, h('b', null, 'Ação: '), o.acao),
         (o.parada_min || o.executores?.length || o.executor) && h('small', null, [o.parada_min ? `Parado ${fmtMin(o.parada_min)}` : '', (o.executores?.length || o.executor) ? `Executou: ${o.executores?.length ? o.executores.join(', ') : o.executor}` : ''].filter(Boolean).join(' • '))])))
@@ -306,7 +306,36 @@ export function viewComponente(cod) {
     h('nav', { class: 'migalhas', 'aria-label': 'Caminho' }, h('a', { href: '#/arvore' }, 'Árvore'), cam.map(x => [' › ', x.codigo === cod ? h('strong', null, x.nome) : h('a', { href: '#/c/' + encodeURIComponent(x.codigo) }, x.nome)])),
     h('div', { class: 'topo-pagina' }, h('h1', null, c.nome), acoes),
     h('section', { class: 'painel' }, ficha, falta, checklist),
-    secOc, secAcoes, secOcultos, secFilhos, secLig, secCompras, secParams);
+    painelParadas(oc), secOc, secAcoes, secOcultos, secFilhos, secLig, secCompras, secParams);
+}
+
+// ---------- resumo das paradas do componente (inclui as que vieram dos apontamentos) ----------
+let periodoParadas = '90';
+function painelParadas(oc) {
+  const corpo = h('div');
+  const chips = h('div', { class: 'abas', style: 'margin:.2rem 0 .8rem' });
+  const PER = [['30', '30 dias'], ['90', '90 dias'], ['365', '12 meses'], ['tudo', 'Tudo']];
+  const desenhar = () => {
+    chips.replaceChildren(...PER.map(([k, rot]) => h('a', { href: 'javascript:void 0', class: periodoParadas === k ? 'ativa' : '', onclick: e => { e.preventDefault(); periodoParadas = k; desenhar(); } }, rot)));
+    const desde = periodoParadas === 'tudo' ? null : Date.now() - Number(periodoParadas) * 86400000;
+    const xs = oc.filter(o => !desde || new Date(o.data_hora).getTime() >= desde);
+    const falhas = xs.filter(o => o.tipo === 'Falha');
+    const min = xs.reduce((a, o) => a + (Number(o.parada_min) || 0), 0), minF = falhas.reduce((a, o) => a + (Number(o.parada_min) || 0), 0);
+    const doAp = xs.filter(o => o.origem === 'apontamento').length;
+    const ord = falhas.map(o => new Date(o.data_hora).getTime()).sort((a, b) => a - b);
+    const intervalos = ord.slice(1).map((t, i) => (t - ord[i]) / 86400000);
+    const entre = intervalos.length ? intervalos.reduce((a, b) => a + b, 0) / intervalos.length : null;
+    const kpi = (rot, val, dica) => h('div', { title: dica || '' }, h('small', { style: 'display:block;color:var(--suave)' }, rot), h('div', { style: 'font-size:1.5rem;font-weight:700' }, val));
+    corpo.replaceChildren(h('div', { style: 'display:flex;gap:1.6rem;flex-wrap:wrap' },
+      kpi('Ocorrências', xs.length), kpi('Falhas', falhas.length),
+      kpi('Tempo de máquina parada', min ? fmtMin(min) : '0', 'Soma do tempo parado de todas as ocorrências do período, deste item e dos itens dentro dele.'),
+      kpi('Tempo médio de reparo (MTTR)', falhas.length ? fmtMin(Math.round(minF / falhas.length)) : '—', 'Tempo parado das falhas ÷ número de falhas.'),
+      kpi('Dias entre falhas (média)', entre !== null ? entre.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) : '—', 'Média do intervalo, em dias corridos, entre uma falha e a seguinte.'),
+      kpi('Vindas dos apontamentos', doAp, 'Ocorrências criadas automaticamente a partir do sistema de apontamentos da Megadoor.')),
+      ...(xs.length ? [] : [h('p', { class: 'vazio' }, 'Nenhuma ocorrência no período.')]));
+  };
+  desenhar();
+  return h('section', { class: 'painel' }, h('h2', null, 'Paradas deste item'), chips, corpo);
 }
 
 // ---------- ligações: tabela e mapa ----------
